@@ -37,11 +37,11 @@ async def plan_trip(request: TripRequest):
 
         # 获取Agent实例
         print("🔄 获取多智能体系统实例...")
-        agent = get_trip_planner_agent()
+        agent = await get_trip_planner_agent()
 
         # 生成旅行计划
         print("🚀 开始生成旅行计划...")
-        trip_plan = agent.plan_trip(request)
+        trip_plan =  await agent.plan_trip(request)
 
         print("✅ 旅行计划生成成功,准备返回响应\n")
 

@@ -1,48 +1,57 @@
 """高德地图MCP服务封装"""
 
 from typing import List, Dict, Any, Optional
-from hello_agents.tools import MCPTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_core.tools import BaseTool
 from ..config import get_settings
 from ..models.schemas import Location, POIInfo, WeatherInfo
+import asyncio
 
 # 全局MCP工具实例
 _amap_mcp_tool = None
 
 
-def get_amap_mcp_tool() -> MCPTool:
+async def get_amap_mcp_tool() -> list[BaseTool]:
     """
-    获取高德地图MCP工具实例(单例模式)
+    使用 LangChain MCPClient 获取高德地图 MCP 工具列表
+    异步获取高德地图MCP工具实例(单例模式)
     
     Returns:
-        MCPTool实例
+        BaseTool列表
     """
     global _amap_mcp_tool
     
-    if _amap_mcp_tool is None:
+    if _amap_mcp_tool is not None:
+        return _amap_mcp_tool
+    else:
         settings = get_settings()
         
         if not settings.amap_api_key:
             raise ValueError("高德地图API Key未配置,请在.env文件中设置AMAP_API_KEY")
         
         # 创建MCP工具
-        _amap_mcp_tool = MCPTool(
-            name="amap",
-            description="高德地图服务,支持POI搜索、路线规划、天气查询等功能",
-            server_command=["uvx", "amap-mcp-server"],
-            env={"AMAP_MAPS_API_KEY": settings.amap_api_key},
-            auto_expand=True  # 自动展开为独立工具
+        _amap_mcp_client = MultiServerMCPClient(
+            {
+                "amap":{
+                    "command": "uvx",
+                    "args": ["amap-mcp-server"],
+                    "env": {"AMAP_MAPS_API_KEY": settings.amap_api_key},
+                    "transport": "stdio",
+                }
+            }
         )
         
+        _amap_mcp_tool = await _amap_mcp_client.get_tools()
         print(f"✅ 高德地图MCP工具初始化成功")
-        print(f"   工具数量: {len(_amap_mcp_tool._available_tools)}")
+        print(f"   工具数量: {len(_amap_mcp_tool)}")
         
         # 打印可用工具列表
-        if _amap_mcp_tool._available_tools:
+        if len(_amap_mcp_tool):
             print("   可用工具:")
-            for tool in _amap_mcp_tool._available_tools[:5]:  # 只打印前5个
-                print(f"     - {tool.get('name', 'unknown')}")
-            if len(_amap_mcp_tool._available_tools) > 5:
-                print(f"     ... 还有 {len(_amap_mcp_tool._available_tools) - 5} 个工具")
+            for tool in _amap_mcp_tool[:5]:  # 只打印前5个
+                print(f"     - {tool.name}")
+            if len(_amap_mcp_tool) > 5:
+                print(f"     ... 还有 {len(_amap_mcp_tool) - 5} 个工具")
     
     return _amap_mcp_tool
 
@@ -52,9 +61,14 @@ class AmapService:
     
     def __init__(self):
         """初始化服务"""
-        self.mcp_tool = get_amap_mcp_tool()
+        self.mcp_tool = None
     
-    def search_poi(self, keywords: str, city: str, citylimit: bool = True) -> List[POIInfo]:
+    async def init(self):
+        """异步初始化MCP工具"""
+        self.mcp_tool = await get_amap_mcp_tool()
+
+    
+    async def search_poi(self, keywords: str, city: str, citylimit: bool = True) -> List[POIInfo]:
         """
         搜索POI
         
@@ -68,14 +82,14 @@ class AmapService:
         """
         try:
             # 调用MCP工具
-            result = self.mcp_tool.run({
-                "action": "call_tool",
-                "tool_name": "maps_text_search",
-                "arguments": {
-                    "keywords": keywords,
+            amap = AmapService()
+            await amap.init()
+            search_tool = next(tool for tool in self.mcp_tool if tool.name == "maps_text_search")
+            
+            result = await search_tool.ainvoke({
+                "keywords": keywords,
                     "city": city,
                     "citylimit": str(citylimit).lower()
-                }
             })
             
             # 解析结果
@@ -90,7 +104,7 @@ class AmapService:
             print(f"❌ POI搜索失败: {str(e)}")
             return []
     
-    def get_weather(self, city: str) -> List[WeatherInfo]:
+    async def get_weather(self, city: str) -> List[WeatherInfo]:
         """
         查询天气
         
@@ -102,12 +116,12 @@ class AmapService:
         """
         try:
             # 调用MCP工具
-            result = self.mcp_tool.run({
-                "action": "call_tool",
-                "tool_name": "maps_weather",
-                "arguments": {
-                    "city": city
-                }
+            amap = AmapService()
+            await amap.init()
+            weather_tool = next(tool for tool in self.mcp_tool if tool.name == "maps_weather")
+
+            result = await weather_tool.ainvoke({
+                "city": city
             })
             
             print(f"天气查询结果: {result[:200]}...")
@@ -119,7 +133,7 @@ class AmapService:
             print(f"❌ 天气查询失败: {str(e)}")
             return []
     
-    def plan_route(
+    async def plan_route(
         self,
         origin_address: str,
         destination_address: str,
@@ -141,6 +155,8 @@ class AmapService:
             路线信息
         """
         try:
+            amap = AmapService()
+            await amap.init()
             # 根据路线类型选择工具
             tool_map = {
                 "walking": "maps_direction_walking_by_address",
@@ -170,11 +186,8 @@ class AmapService:
                     arguments["destination_city"] = destination_city
             
             # 调用MCP工具
-            result = self.mcp_tool.run({
-                "action": "call_tool",
-                "tool_name": tool_name,
-                "arguments": arguments
-            })
+            route_tool = next(tool for tool in self.mcp_tool if tool.name == tool_name)
+            result = await route_tool.ainvoke(arguments)
             
             print(f"路线规划结果: {result[:200]}...")
             
@@ -185,7 +198,7 @@ class AmapService:
             print(f"❌ 路线规划失败: {str(e)}")
             return {}
     
-    def geocode(self, address: str, city: Optional[str] = None) -> Optional[Location]:
+    async def geocode(self, address: str, city: Optional[str] = None) -> Optional[Location]:
         """
         地理编码(地址转坐标)
 
@@ -197,15 +210,15 @@ class AmapService:
             经纬度坐标
         """
         try:
+            amap = AmapService()
+            await amap.init()
+
             arguments = {"address": address}
             if city:
                 arguments["city"] = city
 
-            result = self.mcp_tool.run({
-                "action": "call_tool",
-                "tool_name": "maps_geo",
-                "arguments": arguments
-            })
+            geocode_tool = next(tool for tool in self.mcp_tool if tool.name == "maps_geo")
+            result = await geocode_tool.ainvoke(arguments)
 
             print(f"地理编码结果: {result[:200]}...")
 
@@ -216,7 +229,7 @@ class AmapService:
             print(f"❌ 地理编码失败: {str(e)}")
             return None
 
-    def get_poi_detail(self, poi_id: str) -> Dict[str, Any]:
+    async def get_poi_detail(self, poi_id: str) -> Dict[str, Any]:
         """
         获取POI详情
 
@@ -227,12 +240,11 @@ class AmapService:
             POI详情信息
         """
         try:
-            result = self.mcp_tool.run({
-                "action": "call_tool",
-                "tool_name": "maps_search_detail",
-                "arguments": {
-                    "id": poi_id
-                }
+            amap = AmapService()
+            await amap.init()
+            detail_tool = next(tool for tool in self.mcp_tool if tool.name == "maps_search_detail")
+            result = await detail_tool.ainvoke({
+                "id": poi_id
             })
 
             print(f"POI详情结果: {result[:200]}...")
@@ -258,12 +270,13 @@ class AmapService:
 _amap_service = None
 
 
-def get_amap_service() -> AmapService:
+async def get_amap_service() -> AmapService:
     """获取高德地图服务实例(单例模式)"""
     global _amap_service
     
     if _amap_service is None:
         _amap_service = AmapService()
+        await _amap_service.init()
     
     return _amap_service
 

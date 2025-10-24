@@ -33,12 +33,12 @@ class UnsplashService:
             }
             
             response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
+            response.raise_for_status()#若请求出错，会直接抛出异常
             
             data = response.json()
             results = data.get("results", [])
             
-            # 提取图片URL
+            # 提取每张图片URL
             photos = []
             for photo in results:
                 photos.append({

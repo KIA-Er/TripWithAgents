@@ -112,4 +112,7 @@ def print_config():
 
 # ✅ 在命令行运行该文件时自动打印配置
 if __name__ == "__main__":
-    print_config()
+
+    settings = get_settings()
+    print(f"🔍 openai_api_key = {settings.openai_api_key!r}")
+
