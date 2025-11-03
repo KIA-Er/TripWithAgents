@@ -1,10 +1,10 @@
 # HelloAgents智能旅行助手 🌍✈️
 
-基于HelloAgents框架构建的智能旅行规划助手,集成高德地图MCP服务,提供个性化的旅行计划生成。
+基于LangGraph框架构建的智能旅行规划助手,集成高德地图MCP服务,提供个性化的旅行计划生成。
 
 ## ✨ 功能特点
 
-- 🤖 **AI驱动的旅行规划**: 基于HelloAgents框架的SimpleAgent,智能生成详细的多日旅程
+- 🤖 **AI驱动的旅行规划**: 基于LangGraph+LangChain框架的Supervisor模式多Agents,智能生成详细的多日旅程
 - 🗺️ **高德地图集成**: 通过MCP协议接入高德地图服务,支持景点搜索、路线规划、天气查询
 - 🧠 **智能工具调用**: Agent自动调用高德地图MCP工具,获取实时POI、路线和天气信息
 - 🎨 **现代化前端**: Vue3 + TypeScript + Vite,响应式设计,流畅的用户体验
@@ -13,12 +13,11 @@
 ## 🏗️ 技术栈
 
 ### 后端
-- **框架**: HelloAgents (基于SimpleAgent)
+- **框架**: LangGraph+LangChain 
 - **API**: FastAPI
 - **MCP工具**: amap-mcp-server (高德地图)
 - **LLM**: 支持多种LLM提供商(OpenAI, DeepSeek等)
 
-### 前端
 - **框架**: Vue 3 + TypeScript
 - **构建工具**: Vite
 - **UI组件库**: Ant Design Vue
@@ -32,6 +31,7 @@ helloagents-trip-planner/
 ├── backend/                    # 后端服务
 │   ├── app/
 │   │   ├── agents/            # Agent实现
+│   │   │   ├── prompt.py
 │   │   │   └── trip_planner_agent.py
 │   │   ├── api/               # FastAPI路由
 │   │   │   ├── main.py
@@ -133,9 +133,9 @@ npm run dev
 2. 点击"生成旅行计划"按钮
 
 3. 系统将:
-   - 调用HelloAgents Agent生成初步计划
-   - Agent自动调用高德地图MCP工具搜索景点
-   - Agent获取天气信息和路线规划
+   - 调用LangGraph Multiagent实现的编译Graph生成初步计划
+   - Graph自动调用高德地图MCP工具搜索景点
+   - Graph获取天气信息和路线规划
    - 整合所有信息生成完整行程
 
 4. 查看结果:
@@ -147,29 +147,27 @@ npm run dev
 
 ## 🔧 核心实现
 
-### HelloAgents Agent集成
+### LangGraph MultiAgent集成
 
 ```python
-from hello_agents import SimpleAgent, HelloAgentsLLM
-from hello_agents.tools import MCPTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 # 创建高德地图MCP工具
-amap_tool = MCPTool(
-    name="amap",
-    server_command=["uvx", "amap-mcp-server"],
-    env={"AMAP_MAPS_API_KEY": "your_api_key"},
-    auto_expand=True
+# 创建MCP工具
+_amap_mcp_client = MultiServerMCPClient(
+   {
+         "amap":{
+            "command": "uvx",
+            "args": ["amap-mcp-server"],
+            "env": {"AMAP_MAPS_API_KEY": settings.amap_api_key},
+            "transport": "stdio",
+         }
+   }
 )
 
-# 创建旅行规划Agent
-agent = SimpleAgent(
-    name="旅行规划助手",
-    llm=HelloAgentsLLM(),
-    system_prompt="你是一个专业的旅行规划助手..."
-)
+_amap_mcp_tool = await _amap_mcp_client.get_tools()
 
-# 添加工具
-agent.add_tool(amap_tool)
+
 ```
 
 ### MCP工具调用
